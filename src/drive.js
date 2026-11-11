@@ -27,13 +27,31 @@ export async function driveRequest(token, path, params = {}, signal) {
         ...(error.errors || []).map((item) => item.reason),
         ...(error.details || []).map((item) => item.reason),
       ];
-      if (reasons.some((reason) => ["accessNotConfigured", "SERVICE_DISABLED"].includes(reason))) {
-        throw new Error("Google Drive API is disabled in your OAuth project. Enable it at https://console.cloud.google.com/apis/library/drive.googleapis.com?project=548264816971, wait a few minutes, then Refresh library.");
+      if (
+        reasons.some((reason) =>
+          ["accessNotConfigured", "SERVICE_DISABLED"].includes(reason),
+        )
+      ) {
+        throw new Error(
+          "Google Drive API is disabled in your OAuth project. Enable it at https://console.cloud.google.com/apis/library/drive.googleapis.com?project=548264816971, wait a few minutes, then Refresh library.",
+        );
       }
-      if (reasons.some((reason) => ["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"].includes(reason))) {
-        throw new Error("Google Drive read permission is missing. Disconnect, reconnect, and allow read-only access to Drive.");
+      if (
+        reasons.some((reason) =>
+          [
+            "insufficientPermissions",
+            "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+          ].includes(reason),
+        )
+      ) {
+        throw new Error(
+          "Google Drive read permission is missing. Disconnect, reconnect, and allow read-only access to Drive.",
+        );
       }
-      throw new Error(error.message || "Google Drive denied access (403). Check that your signed-in account can open this folder.");
+      throw new Error(
+        error.message ||
+          "Google Drive denied access (403). Check that your signed-in account can open this folder.",
+      );
     }
     throw new Error(
       `Could not load this Drive item (${response.status}). Please try again.`,
@@ -50,7 +68,8 @@ export async function listFolder(token, id, signal) {
       "files",
       {
         q: `'${id.replace(/'/g, "\\'")}' in parents and trashed = false`,
-        fields: "nextPageToken,files(id,name,mimeType,modifiedTime)",
+        fields:
+          "nextPageToken,files(id,name,mimeType,modifiedTime,imageMediaMetadata(width,height))",
         pageSize: "1000",
         supportsAllDrives: "true",
         includeItemsFromAllDrives: "true",

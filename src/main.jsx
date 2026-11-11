@@ -27,6 +27,12 @@ import {
   driveRequest,
 } from "./drive";
 import "./style.css";
+import {
+  createDownloadQueue,
+  pageRatio,
+  preloadMargin,
+} from "./reader-loading";
+const downloadPage = createDownloadQueue(4);
 const readStorage = (key, fallback) => {
   try {
     return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -35,60 +41,104 @@ const readStorage = (key, fallback) => {
   }
 };
 function Media({ file, token }) {
-  const [url, setUrl] = useState(""),
-    [error, setError] = useState(""),
-    [retry, setRetry] = useState(0);
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [ratio, setRatio] = useState(() => pageRatio(file));
   const ref = useRef(null);
   useEffect(() => {
     let active = true,
-      objectUrl;
+      objectUrl,
+      observer,
+      started = false;
     const controller = new AbortController();
     setUrl("");
     setError("");
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          observer.disconnect();
-          driveRequest(
+    setRatio(pageRatio(file));
+    const start = () => {
+      if (started) return;
+      started = true;
+      observer?.disconnect();
+      downloadPage(
+        async () => {
+          const response = await driveRequest(
             token,
             `files/${file.id}`,
             { alt: "media" },
             controller.signal,
-          )
-            .then((r) => r.blob())
-            .then((blob) => {
-              objectUrl = URL.createObjectURL(blob);
-              if (active) setUrl(objectUrl);
-              else URL.revokeObjectURL(objectUrl);
-            })
-            .catch((e) => {
-              if (active && e.name !== "AbortError") setError(e.message);
-            });
-        }
-      },
-      { rootMargin: "600px" },
-    );
-    observer.observe(ref.current);
+          );
+          const blob = await response.blob();
+          if (!active) return;
+          objectUrl = URL.createObjectURL(blob);
+          if (file.mimeType.startsWith("image/")) {
+            const image = new Image();
+            image.src = objectUrl;
+            await image.decode();
+            if (active && image.naturalWidth && image.naturalHeight) {
+              setRatio(image.naturalWidth / image.naturalHeight);
+            }
+          }
+          if (active) setUrl(objectUrl);
+        },
+        controller.signal,
+        () => {
+          const box = ref.current?.getBoundingClientRect();
+          if (!box) return Infinity;
+          if (box.bottom >= 0 && box.top <= window.innerHeight) return 0;
+          return box.top > window.innerHeight
+            ? box.top - window.innerHeight
+            : Math.abs(box.bottom) + window.innerHeight;
+        },
+      ).catch((e) => {
+        if (active && e.name !== "AbortError") setError(e.message);
+        if (objectUrl && !active) URL.revokeObjectURL(objectUrl);
+      });
+    };
+    // Rebuild the buffer on resize/orientation change; the observer keeps
+    // replenishing it as each new screen enters the three-screen lookahead.
+    const observe = () => {
+      if (started) return;
+      observer?.disconnect();
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) start();
+        },
+        { rootMargin: preloadMargin(window.innerHeight) },
+      );
+      observer.observe(ref.current);
+    };
+    observe();
+    window.addEventListener("resize", observe);
     return () => {
       active = false;
       controller.abort();
-      observer.disconnect();
+      observer?.disconnect();
+      window.removeEventListener("resize", observe);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [file.id, token, retry]);
+  const isPdf = file.mimeType === "application/pdf";
   return (
-    <div className="media" ref={ref}>
+    <div
+      className={`media ${!url && !error ? "buffering" : ""}`}
+      ref={ref}
+      style={isPdf ? { height: "85vh" } : { aspectRatio: ratio }}
+      aria-busy={!url && !error}
+    >
       {error ? (
         <div className="media-error">
           {error}
           <button onClick={() => setRetry((v) => v + 1)}>Retry page</button>
         </div>
       ) : !url ? (
-        <div className="page-loading">Loading {file.name}…</div>
-      ) : file.mimeType === "application/pdf" ? (
+        <div className="page-loading">
+          <span className="page-spinner" />
+          <span>Preparing page…</span>
+        </div>
+      ) : isPdf ? (
         <iframe title={file.name} src={url} />
       ) : (
-        <img src={url} alt={file.name} />
+        <img src={url} alt={file.name} decoding="async" />
       )}
     </div>
   );
@@ -416,7 +466,11 @@ function App() {
               <>
                 <div className="reading-pages">
                   {pages.map((f) => (
-                    <Media key={f.id} file={f} token={token} />
+                    <Media
+                      key={`${chapter.id}-${f.id}`}
+                      file={f}
+                      token={token}
+                    />
                   ))}
                   {!pages.length && (
                     <div className="empty">

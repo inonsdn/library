@@ -40,4 +40,4 @@ npm test
 npm run build
 ```
 
-The tests cover pagination, page ordering, HTML exclusion, and expired authorization. A real private-Drive end-to-end check requires browser Google consent; a chat connector’s access does not transfer to the deployed website. Pages load as they approach the viewport. Reading history resumes at the last chapter, not an exact scroll offset. EPUB/CBZ parsing is not included.
+The tests cover pagination, page ordering, HTML exclusion, and expired authorization. A real private-Drive end-to-end check requires browser Google consent; a chat connector’s access does not transfer to the deployed website. Pages reserve their image dimensions and preload three viewport heights ahead, replenishing continuously while scrolling. A four-download queue prioritizes the current viewport and decodes images before display. Reading history resumes at the last chapter, not an exact scroll offset. EPUB/CBZ parsing is not included.
