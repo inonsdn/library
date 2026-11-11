@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { readSession } from "../server/session.js";
+import { fetchDriveMedia } from "../server/drive-media.js";
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -14,7 +15,7 @@ export default async function handler(req, res) {
   const controller = new AbortController();
   res.on("close", () => controller.abort());
   try {
-    const upstream = await fetch(
+    const upstream = await fetchDriveMedia(
       `https://www.googleapis.com/drive/v3/files/${id}?alt=media`,
       {
         headers: {
@@ -39,7 +40,7 @@ export default async function handler(req, res) {
       return res.status(415).end();
     }
     res.status(upstream.status);
-    for (const header of ["content-range", "accept-ranges", "content-length"]) {
+    for (const header of ["content-range", "accept-ranges"]) {
       const value = upstream.headers.get(header);
       if (value) res.setHeader(header, value);
     }

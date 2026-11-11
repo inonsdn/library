@@ -43,18 +43,48 @@ const readStorage = (key, fallback) => {
     return fallback;
   }
 };
-function Media({ file, token }) {
+function Media({ file, token, onReconnect }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [ratio, setRatio] = useState(() => pageRatio(file));
   const ref = useRef(null);
   const finishLoad = useRef(() => {});
+  const recoverImage = useRef(() => {});
   useEffect(() => {
     let active = true,
       observer,
       started = false;
     const controller = new AbortController();
+    let fallbackStarted = false,
+      fallbackUrl;
+    recoverImage.current = async () => {
+      if (!active) return;
+      if (fallbackStarted) {
+        setError(
+          "This image could not be decoded. Try again or open the original in Drive.",
+        );
+        finishLoad.current();
+        return;
+      }
+      fallbackStarted = true;
+      try {
+        // A temporary proxy failure should not interrupt reading or require login.
+        const response = await driveRequest(
+          token,
+          `files/${file.id}`,
+          { alt: "media" },
+          controller.signal,
+        );
+        const blob = await response.blob();
+        if (!active) return;
+        fallbackUrl = URL.createObjectURL(blob);
+        setUrl(fallbackUrl);
+      } catch (e) {
+        if (active && e.name !== "AbortError") setError(e.message);
+        finishLoad.current();
+      }
+    };
     setUrl("");
     setError("");
     setRatio(pageRatio(file));
@@ -111,6 +141,7 @@ function Media({ file, token }) {
       controller.abort();
       observer?.disconnect();
       window.removeEventListener("resize", observe);
+      if (fallbackUrl) URL.revokeObjectURL(fallbackUrl);
     };
   }, [file.id, token, retry]);
   const isPdf = file.mimeType === "application/pdf";
@@ -125,6 +156,16 @@ function Media({ file, token }) {
         <div className="media-error">
           {error}
           <button onClick={() => setRetry((v) => v + 1)}>Retry page</button>
+          {/expired|permission|401/i.test(error) && (
+            <button onClick={onReconnect}>Reconnect Google Drive</button>
+          )}
+          <a
+            href={`https://drive.google.com/file/d/${file.id}/view`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open original in Drive
+          </a>
         </div>
       ) : !url ? (
         <div className="page-loading">
@@ -138,12 +179,7 @@ function Media({ file, token }) {
           src={url}
           alt={file.name}
           decoding="async"
-          onError={() => {
-            setError(
-              "Could not load this page. Retry, or reconnect Drive if your session expired.",
-            );
-            finishLoad.current();
-          }}
+          onError={() => recoverImage.current()}
           onLoad={(e) => {
             finishLoad.current();
             setRatio(
@@ -393,7 +429,7 @@ function App() {
             return;
           }
           setToken(r.access_token);
-          loadBooks(r.access_token);
+          if (!selected) loadBooks(r.access_token);
         },
         error_callback: () =>
           setError("Google sign-in was closed or blocked. Please try again."),
@@ -659,6 +695,7 @@ function App() {
                         key={`${chapter.id}-${f.id}`}
                         file={f}
                         token={token}
+                        onReconnect={connect}
                       />
                     ) : (
                       <FileContent
