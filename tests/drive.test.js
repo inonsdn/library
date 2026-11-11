@@ -84,20 +84,14 @@ test("preserves Google error details for other forbidden responses", async () =>
   await assert.rejects(listFolder("test", "root"), /Download quota exceeded/);
 });
 
-test("keeps non-image books and standalone HTML available through safe viewers", async () => {
+test("excludes JSON and other documents from image chapters", async () => {
   const files = [
-    { id: "text", name: "notes.txt", mimeType: "text/plain" },
-    { id: "pdf", name: "book.pdf", mimeType: "application/pdf" },
-    {
-      id: "doc",
-      name: "document",
-      mimeType: "application/vnd.google-apps.document",
-    },
-    { id: "html", name: "index.html", mimeType: "text/html" },
+    {id:"json",name:"metadata.json",mimeType:"application/json"},
+    {id:"text",name:"notes.txt",mimeType:"text/plain"},
+    {id:"pdf",name:"book.pdf",mimeType:"application/pdf"},
+    {id:"html",name:"index.html",mimeType:"text/html"},
+    {id:"image",name:"001.jpg",mimeType:"image/jpeg"},
   ];
-  global.fetch = async () => ({ ok: true, json: async () => ({ files }) });
-  assert.deepEqual(
-    (await chapterFiles("test", "chapter")).map((f) => f.id).sort(),
-    ["doc", "html", "pdf", "text"],
-  );
+  global.fetch = async () => ({ok:true,json:async()=>({files})});
+  assert.deepEqual((await chapterFiles("test","chapter")).map(f=>f.id),["image"]);
 });

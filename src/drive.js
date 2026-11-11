@@ -8,7 +8,7 @@ export const naturalSort = (files) =>
       sensitivity: "base",
     }),
   );
-export const readable = (f) => Boolean(f.mimeType && f.mimeType !== FOLDER);
+export const readable = (f) => Boolean(f.mimeType?.startsWith("image/"));
 export async function driveRequest(token, path, params = {}, signal) {
   const response = await fetch(
     `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
