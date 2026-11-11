@@ -7,6 +7,9 @@ import {
   ArrowUpRight,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUpDown,
   Bookmark,
   Grid2X2,
   List,
@@ -232,6 +235,43 @@ function FileContent({ file, token }) {
     </section>
   );
 }
+function ChapterList({ chapters, current, onChoose, onClose }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    dialog.current.showModal();
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="chapter-dialog"
+      aria-labelledby="chapter-list-title"
+      onClose={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="chapter-dialog-heading">
+        <h2 id="chapter-list-title">Chapters</h2>
+        <button aria-label="Close chapter list" onClick={onClose}>
+          <X size={20} />
+        </button>
+      </div>
+      <nav className="chapter-dialog-list" aria-label="Chapter list">
+        {chapters.map((c) => (
+          <button
+            key={c.id}
+            aria-current={c.id === current ? "page" : undefined}
+            onClick={() => onChoose(c)}
+          >
+            <BookOpen size={17} />
+            <span>{c.name}</span>
+            {c.id === current && <small>Reading</small>}
+          </button>
+        ))}
+      </nav>
+    </dialog>
+  );
+}
 function App() {
   const [token, setToken] = useState(""),
     [clientId, setClientId] = useState(
@@ -252,6 +292,16 @@ function App() {
     [view, setView] = useState("grid");
   const [saved, setSaved] = useState(() => readStorage("folio-saved", [])),
     [progress, setProgress] = useState(() => readStorage("folio-progress", {}));
+  const [chapterListOpen, setChapterListOpen] = useState(false);
+  const [scrollToolsOpen, setScrollToolsOpen] = useState(false);
+  function jumpTo(edge) {
+    window.scrollTo({
+      top: edge === "top" ? 0 : document.documentElement.scrollHeight,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+    });
+  }
   const request = useRef(0);
   const saveProgress = (book, ch) =>
     setProgress((p) => {
@@ -633,6 +683,14 @@ function App() {
                     <ArrowLeft size={18} /> Previous chapter
                   </button>
                   <button
+                    className="chapter-list-trigger"
+                    onClick={() => setChapterListOpen(true)}
+                    aria-haspopup="dialog"
+                  >
+                    <List size={18} />
+                    <span>Chapters</span>
+                  </button>
+                  <button
                     disabled={
                       chapterIndex < 0 || chapterIndex >= chapters.length - 1
                     }
@@ -835,6 +893,52 @@ function App() {
           </>
         )}
       </main>
+      {chapter && (
+        <div className={`scroll-tools ${scrollToolsOpen ? "expanded" : ""}`}>
+          {scrollToolsOpen && (
+            <div id="scroll-actions" className="scroll-actions">
+              <button
+                onClick={() => jumpTo("top")}
+                aria-label="Go to top"
+                title="Go to top"
+              >
+                <ArrowUp size={19} />
+              </button>
+              <button
+                onClick={() => jumpTo("bottom")}
+                aria-label="Go to bottom"
+                title="Go to bottom"
+              >
+                <ArrowDown size={19} />
+              </button>
+            </div>
+          )}
+          <button
+            className="scroll-toggle"
+            onClick={() => setScrollToolsOpen((open) => !open)}
+            aria-label={
+              scrollToolsOpen
+                ? "Fold scroll controls"
+                : "Expand scroll controls"
+            }
+            aria-expanded={scrollToolsOpen}
+            aria-controls={scrollToolsOpen ? "scroll-actions" : undefined}
+          >
+            {scrollToolsOpen ? <X size={18} /> : <ChevronsUpDown size={20} />}
+          </button>
+        </div>
+      )}
+      {chapter && chapterListOpen && (
+        <ChapterList
+          chapters={chapters.length ? chapters : [chapter]}
+          current={chapter.id}
+          onClose={() => setChapterListOpen(false)}
+          onChoose={(c) => {
+            setChapterListOpen(false);
+            openChapter(c);
+          }}
+        />
+      )}
       {settings && (
         <div className="modal-backdrop" onClick={() => setSettings(false)}>
           <section
