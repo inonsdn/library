@@ -46,9 +46,9 @@ function Media({ file, token }) {
   const [retry, setRetry] = useState(0);
   const [ratio, setRatio] = useState(() => pageRatio(file));
   const ref = useRef(null);
+  const finishLoad = useRef(() => {});
   useEffect(() => {
     let active = true,
-      objectUrl,
       observer,
       started = false;
     const controller = new AbortController();
@@ -60,26 +60,21 @@ function Media({ file, token }) {
       started = true;
       observer?.disconnect();
       downloadPage(
-        async () => {
-          const response = await driveRequest(
-            token,
-            `files/${file.id}`,
-            { alt: "media" },
-            controller.signal,
-          );
-          const blob = await response.blob();
-          if (!active) return;
-          objectUrl = URL.createObjectURL(blob);
-          if (file.mimeType.startsWith("image/")) {
-            const image = new Image();
-            image.src = objectUrl;
-            await image.decode();
-            if (active && image.naturalWidth && image.naturalHeight) {
-              setRatio(image.naturalWidth / image.naturalHeight);
+        () =>
+          new Promise((resolve, reject) => {
+            if (!active) {
+              resolve();
+              return;
             }
-          }
-          if (active) setUrl(objectUrl);
-        },
+            const source = `/api/image?id=${encodeURIComponent(file.id)}&attempt=${retry}`;
+            finishLoad.current = resolve;
+            controller.signal.addEventListener("abort", resolve, {
+              once: true,
+            });
+            // The actual visible image owns the request and renders while streaming.
+            setUrl(source);
+            if (file.mimeType === "application/pdf") resolve();
+          }),
         controller.signal,
         () => {
           const box = ref.current?.getBoundingClientRect();
@@ -91,7 +86,6 @@ function Media({ file, token }) {
         },
       ).catch((e) => {
         if (active && e.name !== "AbortError") setError(e.message);
-        if (objectUrl && !active) URL.revokeObjectURL(objectUrl);
       });
     };
     // Rebuild the buffer on resize/orientation change; the observer keeps
@@ -114,7 +108,6 @@ function Media({ file, token }) {
       controller.abort();
       observer?.disconnect();
       window.removeEventListener("resize", observe);
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [file.id, token, retry]);
   const isPdf = file.mimeType === "application/pdf";
@@ -133,12 +126,29 @@ function Media({ file, token }) {
       ) : !url ? (
         <div className="page-loading">
           <span className="page-spinner" />
-          <span>Preparing page…</span>
+          <span className="sr-only">Loading page</span>
         </div>
       ) : isPdf ? (
         <iframe title={file.name} src={url} />
       ) : (
-        <img src={url} alt={file.name} decoding="async" />
+        <img
+          src={url}
+          alt={file.name}
+          decoding="async"
+          onError={() => {
+            setError(
+              "Could not load this page. Retry, or reconnect Drive if your session expired.",
+            );
+            finishLoad.current();
+          }}
+          onLoad={(e) => {
+            finishLoad.current();
+            if (!file.imageMediaMetadata?.width)
+              setRatio(
+                e.currentTarget.naturalWidth / e.currentTarget.naturalHeight,
+              );
+          }}
+        />
       )}
     </div>
   );
@@ -187,6 +197,25 @@ function App() {
       if (n === request.current) setLoading(false);
     }
   }
+  const [restoring, setRestoring] = useState(true);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/session")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((session) => {
+        if (active && session.token) {
+          setToken(session.token);
+          loadBooks(session.token);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setRestoring(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   function connect() {
     setError("");
     if (!clientId) {
@@ -203,7 +232,7 @@ function App() {
       .initTokenClient({
         client_id: clientId,
         scope: "https://www.googleapis.com/auth/drive.readonly",
-        callback: (r) => {
+        callback: async (r) => {
           if (r.error) {
             setError(r.error_description || r.error);
             return;
@@ -217,6 +246,23 @@ function App() {
             setError("Read-only Drive access is needed to load your books.");
             return;
           }
+          try {
+            const saved = await fetch("/api/session", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                token: r.access_token,
+                expiresIn: r.expires_in,
+              }),
+            });
+            if (!saved.ok)
+              throw new Error(
+                "Could not save your Drive connection. Please try again.",
+              );
+          } catch (e) {
+            setError(e.message);
+            return;
+          }
           setToken(r.access_token);
           loadBooks(r.access_token);
         },
@@ -225,7 +271,16 @@ function App() {
       })
       .requestAccessToken();
   }
-  function disconnect() {
+  async function disconnect() {
+    try {
+      const response = await fetch("/api/session", { method: "DELETE" });
+      if (!response.ok) throw new Error();
+    } catch {
+      setError(
+        "Could not clear the saved connection. Please try disconnecting again.",
+      );
+      return;
+    }
     request.current++;
     setToken("");
     setBooks([]);
@@ -528,8 +583,15 @@ function App() {
                 Pick up where you left off, or begin somewhere new.
               </p>
               {!token ? (
-                <button className="primary" onClick={connect}>
-                  Connect Google Drive <ArrowUpRight size={18} />
+                <button
+                  className="primary"
+                  onClick={connect}
+                  disabled={restoring}
+                >
+                  {restoring
+                    ? "Restoring your library…"
+                    : "Connect Google Drive"}{" "}
+                  <ArrowUpRight size={18} />
                 </button>
               ) : (
                 <button
@@ -759,7 +821,8 @@ function App() {
             <h2 id="settings-title">Connect your reading room</h2>
             <p>
               This site uses Google’s read-only authorization to load your
-              private books. Your access token stays in memory.
+              private books. Your connection is remembered on this browser until
+              Google’s access token expires.
             </p>
             <label>
               Google OAuth web client ID
