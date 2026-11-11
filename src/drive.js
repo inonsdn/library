@@ -20,10 +20,21 @@ export async function driveRequest(token, path, params = {}, signal) {
       throw new Error(
         "Your Google session expired. Disconnect and connect again.",
       );
-    if (response.status === 403)
-      throw new Error(
-        "Google Drive denied access. Check that Drive API is enabled and you granted read-only access.",
-      );
+    if (response.status === 403) {
+      const body = await response.json().catch(() => ({}));
+      const error = body.error || {};
+      const reasons = [
+        ...(error.errors || []).map((item) => item.reason),
+        ...(error.details || []).map((item) => item.reason),
+      ];
+      if (reasons.some((reason) => ["accessNotConfigured", "SERVICE_DISABLED"].includes(reason))) {
+        throw new Error("Google Drive API is disabled in your OAuth project. Enable it at https://console.cloud.google.com/apis/library/drive.googleapis.com?project=548264816971, wait a few minutes, then Refresh library.");
+      }
+      if (reasons.some((reason) => ["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"].includes(reason))) {
+        throw new Error("Google Drive read permission is missing. Disconnect, reconnect, and allow read-only access to Drive.");
+      }
+      throw new Error(error.message || "Google Drive denied access (403). Check that your signed-in account can open this folder.");
+    }
     throw new Error(
       `Could not load this Drive item (${response.status}). Please try again.`,
     );
