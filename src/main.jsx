@@ -143,14 +143,93 @@ function Media({ file, token }) {
           }}
           onLoad={(e) => {
             finishLoad.current();
-            if (!file.imageMediaMetadata?.width)
-              setRatio(
-                e.currentTarget.naturalWidth / e.currentTarget.naturalHeight,
-              );
+            setRatio(
+              e.currentTarget.naturalWidth / e.currentTarget.naturalHeight,
+            );
           }}
         />
       )}
     </div>
+  );
+}
+function FileContent({ file, token }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const plain =
+    /^(text\/(plain|markdown|csv))$/.test(file.mimeType) ||
+    /\.(txt|md|csv)$/i.test(file.name);
+  useEffect(() => {
+    if (!plain) return;
+    const controller = new AbortController();
+    setLoading(true);
+    driveRequest(token, `files/${file.id}`, { alt: "media" }, controller.signal)
+      .then(async (response) => {
+        const reader = response.body.getReader();
+        const chunks = [];
+        let size = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 2 * 1024 * 1024) {
+            await reader.cancel();
+            throw new Error(
+              "This text is too large for the inline reader. Open it in Drive.",
+            );
+          }
+          chunks.push(value);
+        }
+        return new Blob(chunks).text();
+      })
+      .then(setText)
+      .catch((e) => {
+        if (e.name !== "AbortError") setError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [file.id, token, plain]);
+  const source = `/api/image?id=${encodeURIComponent(file.id)}`;
+  return (
+    <section className="file-content">
+      <div className="file-heading">
+        <h3>{file.name}</h3>
+        <a
+          href={`https://drive.google.com/file/d/${file.id}/view`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open in Drive <ArrowUpRight size={14} />
+        </a>
+      </div>
+      {plain ? (
+        loading ? (
+          <p>Loading document…</p>
+        ) : error ? (
+          <p role="alert">{error}</p>
+        ) : (
+          <pre>{text}</pre>
+        )
+      ) : file.mimeType.startsWith("audio/") ? (
+        <audio controls preload="metadata" src={source} />
+      ) : file.mimeType.startsWith("video/") ? (
+        <video controls preload="metadata" src={source} />
+      ) : (
+        <>
+          <iframe
+            title={file.name}
+            src={`https://drive.google.com/file/d/${file.id}/preview`}
+            allow="fullscreen"
+          />
+          <p className="preview-note">
+            If this format cannot be previewed, use Open in Drive to view or
+            download it.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 function App() {
@@ -368,6 +447,9 @@ function App() {
         (tab === "saved" && saved.includes(b.id)) ||
         (tab === "recent" && progress[b.id])),
   );
+  const lastRead = books
+    .filter((b) => progress[b.id])
+    .sort((a, b) => progress[b.id].at - progress[a.id].at)[0];
   const chapterIndex = chapters.findIndex((c) => c.id === chapter?.id);
   return (
     <div className={chapter ? "app reading" : "app"}>
@@ -520,16 +602,25 @@ function App() {
             ) : chapter ? (
               <>
                 <div className="reading-pages">
-                  {pages.map((f) => (
-                    <Media
-                      key={`${chapter.id}-${f.id}`}
-                      file={f}
-                      token={token}
-                    />
-                  ))}
+                  {pages.map((f) =>
+                    f.mimeType.startsWith("image/") ||
+                    f.mimeType === "application/pdf" ? (
+                      <Media
+                        key={`${chapter.id}-${f.id}`}
+                        file={f}
+                        token={token}
+                      />
+                    ) : (
+                      <FileContent
+                        key={`${chapter.id}-${f.id}`}
+                        file={f}
+                        token={token}
+                      />
+                    ),
+                  )}
                   {!pages.length && (
                     <div className="empty">
-                      No images or PDFs found in this chapter. Use “View in
+                      No readable files found in this chapter. Use “View in
                       Drive” to inspect its contents.
                     </div>
                   )}
@@ -569,75 +660,18 @@ function App() {
           </>
         ) : (
           <>
-            <section className="hero">
-              <div className="eyebrow">
-                <span /> THE PERSONAL LIBRARY
-              </div>
-              <h1>
-                A good book.
-                <br />A little <em>quiet.</em>
-              </h1>
-              <p>
-                All your stories, in one considered space.
-                <br />
-                Pick up where you left off, or begin somewhere new.
-              </p>
-              {!token ? (
-                <button
-                  className="primary"
-                  onClick={connect}
-                  disabled={restoring}
-                >
-                  {restoring
-                    ? "Restoring your library…"
-                    : "Connect Google Drive"}{" "}
-                  <ArrowUpRight size={18} />
-                </button>
-              ) : (
-                <button
-                  className="primary"
-                  onClick={() => {
-                    const b =
-                      books
-                        .filter((b) => progress[b.id])
-                        .sort(
-                          (a, b) => progress[b.id].at - progress[a.id].at,
-                        )[0] || books[0];
-                    if (b) openBook(b);
-                  }}
-                  disabled={!books.length}
-                >
-                  Find your next read <ArrowRight size={18} />
-                </button>
-              )}
-              <div className="hero-art" aria-hidden="true">
-                <div className="orbit" />
-                <div className="art-book back-book">
-                  <span>
-                    THE ART
-                    <br />
-                    OF SLOW
-                    <br />
-                    LIVING
-                  </span>
+            {token && lastRead && (
+              <section className="last-read">
+                <div>
+                  <span className="eyebrow">LAST READ</span>
+                  <h2>{lastRead.name}</h2>
+                  <p>{progress[lastRead.id].chapterName}</p>
                 </div>
-                <div className="art-book front-book">
-                  <small>THE FOLIO COLLECTION</small>
-                  <span>
-                    Somewhere
-                    <br />
-                    <em>between</em>
-                    <br />
-                    the pages.
-                  </span>
-                  <div className="sun" />
-                  <small>A PLACE TO RETURN TO</small>
-                </div>
-                <span className="art-caption">
-                  LESS SCROLLING. MORE STORIES.
-                </span>
-              </div>
-            </section>
+                <button className="primary" onClick={() => openBook(lastRead)}>
+                  Continue reading <ArrowRight size={16} />
+                </button>
+              </section>
+            )}
             <section className="collection">
               <div className="collection-title">
                 <div>
@@ -742,7 +776,7 @@ function App() {
                         ? "Use the bookmark on a book to save it."
                         : tab === "recent"
                           ? "Open a book to start your reading history."
-                          : "Add folders, images, or PDFs in Google Drive, then refresh."}
+                          : "Add books or folders in Google Drive, then refresh."}
                   </p>
                 </div>
               ) : (

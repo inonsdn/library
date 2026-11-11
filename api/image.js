@@ -17,7 +17,10 @@ export default async function handler(req, res) {
     const upstream = await fetch(
       `https://www.googleapis.com/drive/v3/files/${id}?alt=media`,
       {
-        headers: { Authorization: `Bearer ${session.token}` },
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          ...(req.headers.range ? { Range: req.headers.range } : {}),
+        },
         signal: controller.signal,
       },
     );
@@ -26,9 +29,19 @@ export default async function handler(req, res) {
         .status(upstream.status)
         .end("Unable to load page from Google Drive.");
     const type = upstream.headers.get("content-type") || "";
-    if (!type.startsWith("image/") && !type.startsWith("application/pdf")) {
+    if (
+      !type.startsWith("image/") &&
+      !type.startsWith("application/pdf") &&
+      !type.startsWith("audio/") &&
+      !type.startsWith("video/")
+    ) {
       await upstream.body?.cancel();
       return res.status(415).end();
+    }
+    res.status(upstream.status);
+    for (const header of ["content-range", "accept-ranges", "content-length"]) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
     }
     res.setHeader("Content-Type", type);
     res.setHeader("Content-Disposition", "inline");

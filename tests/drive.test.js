@@ -54,13 +54,50 @@ test("reports expired authorization", async () => {
   await assert.rejects(listFolder("bad", "root"), /expired/);
 });
 
-test('explains disabled Drive API separately from missing OAuth scope', async () => {
-  global.fetch = async () => ({ok:false,status:403,json:async()=>({error:{details:[{reason:'SERVICE_DISABLED'}]}})});
-  await assert.rejects(listFolder('test','root'), /API is disabled/);
-  global.fetch = async () => ({ok:false,status:403,json:async()=>({error:{errors:[{reason:'insufficientPermissions'}]}})});
-  await assert.rejects(listFolder('test','root'), /read permission is missing/);
+test("explains disabled Drive API separately from missing OAuth scope", async () => {
+  global.fetch = async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({
+      error: { details: [{ reason: "SERVICE_DISABLED" }] },
+    }),
+  });
+  await assert.rejects(listFolder("test", "root"), /API is disabled/);
+  global.fetch = async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({
+      error: { errors: [{ reason: "insufficientPermissions" }] },
+    }),
+  });
+  await assert.rejects(
+    listFolder("test", "root"),
+    /read permission is missing/,
+  );
 });
-test('preserves Google error details for other forbidden responses', async () => {
-  global.fetch = async () => ({ok:false,status:403,json:async()=>({error:{message:'Download quota exceeded.'}})});
-  await assert.rejects(listFolder('test','root'), /Download quota exceeded/);
+test("preserves Google error details for other forbidden responses", async () => {
+  global.fetch = async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({ error: { message: "Download quota exceeded." } }),
+  });
+  await assert.rejects(listFolder("test", "root"), /Download quota exceeded/);
+});
+
+test("keeps non-image books and standalone HTML available through safe viewers", async () => {
+  const files = [
+    { id: "text", name: "notes.txt", mimeType: "text/plain" },
+    { id: "pdf", name: "book.pdf", mimeType: "application/pdf" },
+    {
+      id: "doc",
+      name: "document",
+      mimeType: "application/vnd.google-apps.document",
+    },
+    { id: "html", name: "index.html", mimeType: "text/html" },
+  ];
+  global.fetch = async () => ({ ok: true, json: async () => ({ files }) });
+  assert.deepEqual(
+    (await chapterFiles("test", "chapter")).map((f) => f.id).sort(),
+    ["doc", "html", "pdf", "text"],
+  );
 });

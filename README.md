@@ -1,6 +1,6 @@
 # Folio — a personal Drive library
 
-React + Vite, deployed exclusively on Vercel. Reads the configured Google Drive folder live after Google authorization. Supports series → episode → images folders, naturally ordered image pages, PDFs, chapter navigation, search, saved books, and local chapter history. No book files or catalog are published to GitHub. Drive HTML is never executed.
+React + Vite, deployed exclusively on Vercel. Reads the configured Google Drive folder live after Google authorization. Supports series → episode → images folders, naturally ordered edge-to-edge image pages, PDFs, plain text/Markdown/CSV, audio/video, chapter navigation, search, saved books, and local chapter history. Other file types use Google Drive previews with an Open in Drive fallback. The compact Lavender Mist interface shows your last read and collection. No book files or catalog are published to GitHub. Drive HTML is never executed.
 
 ## Local development
 
@@ -9,7 +9,7 @@ Requires Node 22 or newer.
 ```sh
 npm ci
 cp .env.example .env.local
-npm run dev
+vercel dev
 ```
 
 Set `VITE_GOOGLE_CLIENT_ID` to a Google OAuth **Web application** client ID. Alternatively enter the ID through Connection settings in the app. Client IDs are public identifiers; never enter a client secret. `VITE_DRIVE_FOLDER_ID` defaults to the supplied library folder.
@@ -40,4 +40,4 @@ npm test
 npm run build
 ```
 
-The tests cover pagination, page ordering, HTML exclusion, and expired authorization. A real private-Drive end-to-end check requires browser Google consent; a chat connector’s access does not transfer to the deployed website. Pages reserve their image dimensions and preload three viewport heights ahead, replenishing continuously while scrolling. A four-download queue prioritizes the current viewport and streams images directly into the visible image elements. Reading history resumes at the last chapter, not an exact scroll offset. EPUB/CBZ parsing is not included.
+The tests cover pagination, page ordering, HTML exclusion, and expired authorization. A real private-Drive end-to-end check requires browser Google consent; a chat connector’s access does not transfer to the deployed website. Pages reserve their image dimensions and preload three viewport heights ahead, replenishing continuously while scrolling. A four-download queue prioritizes the current viewport and streams images directly into the visible image elements. Reading history resumes at the last chapter, not an exact scroll offset. EPUB/CBZ parsing is not included; these files use the Drive preview/download fallback. Use `vercel dev` for local testing of the session and media endpoints (`npm run dev` serves only the frontend).

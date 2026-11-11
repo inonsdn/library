@@ -8,8 +8,7 @@ export const naturalSort = (files) =>
       sensitivity: "base",
     }),
   );
-export const readable = (f) =>
-  f.mimeType?.startsWith("image/") || f.mimeType === "application/pdf";
+export const readable = (f) => Boolean(f.mimeType && f.mimeType !== FOLDER);
 export async function driveRequest(token, path, params = {}, signal) {
   const response = await fetch(
     `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
@@ -92,5 +91,15 @@ export async function chapterFiles(token, id, signal) {
   const nested = await Promise.all(
     imageFolders.map((f) => listFolder(token, f.id, signal)),
   );
-  return naturalSort([...children, ...nested.flat()].filter(readable));
+  const content = [...children, ...nested.flat()].filter(readable);
+  // Generated HTML indexes duplicate the actual manga pages.
+  return naturalSort(
+    content.filter(
+      (f) =>
+        !(
+          content.some((p) => p.mimeType.startsWith("image/")) &&
+          /^(index|default)\.html?$/i.test(f.name)
+        ),
+    ),
+  );
 }
