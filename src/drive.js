@@ -1,3 +1,4 @@
+import { documentType } from "./document-settings.js";
 export const ROOT =
   import.meta.env?.VITE_DRIVE_FOLDER_ID || "1F2MiaOXR-jJi976Sys5aOVcsUbtM_tTM";
 export const FOLDER = "application/vnd.google-apps.folder";
@@ -8,7 +9,8 @@ export const naturalSort = (files) =>
       sensitivity: "base",
     }),
   );
-export const readable = (f) => Boolean(f.mimeType?.startsWith("image/"));
+export const readable = (f) =>
+  Boolean(f.mimeType?.startsWith("image/") || documentType(f));
 export async function driveRequest(token, path, params = {}, signal) {
   const response = await fetch(
     `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
@@ -86,7 +88,7 @@ export async function listFolder(token, id, signal) {
 export async function chapterFiles(token, id, signal) {
   const children = await listFolder(token, id, signal);
   const imageFolders = children.filter(
-    (f) => f.mimeType === FOLDER && /^images?$/i.test(f.name),
+    (f) => f.mimeType === FOLDER && /^(images?|content)$/i.test(f.name),
   );
   const nested = await Promise.all(
     imageFolders.map((f) => listFolder(token, f.id, signal)),

@@ -30,6 +30,8 @@ import {
   driveRequest,
 } from "./drive";
 import "./style.css";
+import { documentType } from "./document-settings";
+const DocumentReader = React.lazy(() => import("./DocumentReader"));
 import {
   createDownloadQueue,
   pageRatio,
@@ -189,86 +191,6 @@ function Media({ file, token, onReconnect }) {
         />
       )}
     </div>
-  );
-}
-function FileContent({ file, token }) {
-  const [text, setText] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const plain =
-    /^(text\/(plain|markdown|csv))$/.test(file.mimeType) ||
-    /\.(txt|md|csv)$/i.test(file.name);
-  useEffect(() => {
-    if (!plain) return;
-    const controller = new AbortController();
-    setLoading(true);
-    driveRequest(token, `files/${file.id}`, { alt: "media" }, controller.signal)
-      .then(async (response) => {
-        const reader = response.body.getReader();
-        const chunks = [];
-        let size = 0;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.byteLength;
-          if (size > 2 * 1024 * 1024) {
-            await reader.cancel();
-            throw new Error(
-              "This text is too large for the inline reader. Open it in Drive.",
-            );
-          }
-          chunks.push(value);
-        }
-        return new Blob(chunks).text();
-      })
-      .then(setText)
-      .catch((e) => {
-        if (e.name !== "AbortError") setError(e.message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [file.id, token, plain]);
-  const source = `/api/image?id=${encodeURIComponent(file.id)}`;
-  return (
-    <section className="file-content">
-      <div className="file-heading">
-        <h3>{file.name}</h3>
-        <a
-          href={`https://drive.google.com/file/d/${file.id}/view`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open in Drive <ArrowUpRight size={14} />
-        </a>
-      </div>
-      {plain ? (
-        loading ? (
-          <p>Loading document…</p>
-        ) : error ? (
-          <p role="alert">{error}</p>
-        ) : (
-          <pre>{text}</pre>
-        )
-      ) : file.mimeType.startsWith("audio/") ? (
-        <audio controls preload="metadata" src={source} />
-      ) : file.mimeType.startsWith("video/") ? (
-        <video controls preload="metadata" src={source} />
-      ) : (
-        <>
-          <iframe
-            title={file.name}
-            src={`https://drive.google.com/file/d/${file.id}/preview`}
-            allow="fullscreen"
-          />
-          <p className="preview-note">
-            If this format cannot be previewed, use Open in Drive to view or
-            download it.
-          </p>
-        </>
-      )}
-    </section>
   );
 }
 function ChapterList({ chapters, current, onChoose, onClose }) {
@@ -474,7 +396,7 @@ function App() {
       const files = await listFolder(token, book.id);
       if (n !== request.current) return;
       const folders = files.filter(
-        (f) => f.mimeType === FOLDER && !/^images?$/i.test(f.name),
+        (f) => f.mimeType === FOLDER && !/^(images?|content)$/i.test(f.name),
       );
       setChapters(folders);
       const resume = folders.find((c) => c.id === progress[book.id]?.chapterId);
@@ -689,21 +611,29 @@ function App() {
               <>
                 <div className="reading-pages">
                   {pages.map((f) =>
-                    f.mimeType.startsWith("image/") ||
-                    f.mimeType === "application/pdf" ? (
+                    documentType(f) ? (
+                      <React.Suspense
+                        key={`${chapter.id}-${f.id}`}
+                        fallback={
+                          <div className="document-loading">
+                            Opening reader…
+                          </div>
+                        }
+                      >
+                        <DocumentReader
+                          file={f}
+                          token={token}
+                          onReconnect={connect}
+                        />
+                      </React.Suspense>
+                    ) : f.mimeType.startsWith("image/") ? (
                       <Media
                         key={`${chapter.id}-${f.id}`}
                         file={f}
                         token={token}
                         onReconnect={connect}
                       />
-                    ) : (
-                      <FileContent
-                        key={`${chapter.id}-${f.id}`}
-                        file={f}
-                        token={token}
-                      />
-                    ),
+                    ) : null,
                   )}
                   {!pages.length && (
                     <div className="empty">
