@@ -12,9 +12,15 @@ export const naturalSort = (files) =>
 export const readable = (f) =>
   Boolean(f.mimeType?.startsWith("image/") || documentType(f));
 export async function driveRequest(token, path, params = {}, signal) {
+  const serverSession = token === "server-session";
   const response = await fetch(
-    `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
-    { headers: { Authorization: `Bearer ${token}` }, signal },
+    serverSession
+      ? `/api/drive?${new URLSearchParams({ path, ...params })}`
+      : `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
+    {
+      headers: serverSession ? {} : { Authorization: `Bearer ${token}` },
+      signal,
+    },
   );
   if (!response.ok) {
     if (response.status === 401)

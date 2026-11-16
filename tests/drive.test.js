@@ -98,3 +98,16 @@ test("accepts images and PDFs while excluding JSON and unrelated documents", asy
     ["image", "pdf"],
   );
 });
+
+test("authenticated server sessions proxy Drive requests without exposing Google tokens", async () => {
+  global.fetch = async (url, options) => {
+    assert.ok(url.startsWith("/api/drive?"));
+    assert.equal(
+      new URL(url, "https://library.nonsdn.com").searchParams.get("path"),
+      "files",
+    );
+    assert.equal(options.headers.Authorization, undefined);
+    return { ok: true, json: async () => ({ files: [] }) };
+  };
+  assert.deepEqual(await listFolder("server-session", "root"), []);
+});

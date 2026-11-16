@@ -1,14 +1,18 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { readSession } from "../server/session.js";
+import { accessSession, sessionError } from "../server/session.js";
 import { fetchDriveMedia } from "../server/drive-media.js";
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   if (req.method !== "GET") return res.status(405).end();
-  const session = readSession(req);
-  if (!session) return res.status(401).end("Reconnect Google Drive.");
+  let session;
+  try {
+    session = await accessSession(req, res);
+  } catch (e) {
+    return sessionError(res, e);
+  }
   const id = req.query.id;
   if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{10,200}$/.test(id))
     return res.status(400).end();

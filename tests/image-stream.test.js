@@ -12,6 +12,10 @@ class Response extends Writable {
   setHeader(k, v) {
     this.headers[k] = v;
   }
+  json(value) {
+    this.end(JSON.stringify(value));
+    return this;
+  }
   status(code) {
     this.statusCode = code;
     return this;

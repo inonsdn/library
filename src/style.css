@@ -1817,3 +1817,29 @@ footer > span:first-child {
     padding-left: 100px;
   }
 }
+.connection-upgrade {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 13px 16px;
+  border: 1px solid #ded0ea;
+  background: #f0e7f8;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #87669d;
+}
+.connection-upgrade button {
+  background: #9474ae;
+  color: #fff;
+  padding: 9px 13px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .connection-upgrade {
+    flex-wrap: wrap;
+    font-size: 11px;
+  }
+}

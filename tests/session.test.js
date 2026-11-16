@@ -42,7 +42,8 @@ test("saves session in HttpOnly cookie and restores it only before expiration", 
   assert.equal(readSession(req, Date.now() + 3601000), null);
   const restored = response();
   await handler({ ...req, method: "GET" }, restored);
-  assert.equal(restored.body.token, "test-token");
+  assert.equal(restored.body.token, "server-session");
+  assert.equal(restored.body.renewable, false);
   assert.equal(restored.headers["Cache-Control"], "private, no-store");
 });
 test("rejects cross-origin writes and disconnect expires saved cookie", async () => {

@@ -31,6 +31,7 @@ import {
 } from "./drive";
 import "./style.css";
 import ReaderStream from "./ReaderStream";
+import { shouldTouchSession } from "./session-activity";
 import { remember } from "./document-settings";
 import { documentType } from "./document-settings";
 const DocumentReader = React.lazy(() => import("./DocumentReader"));
@@ -327,11 +328,21 @@ function App() {
     }
   }
   const [restoring, setRestoring] = useState(true);
+  const [serverAuthReady, setServerAuthReady] = useState(false);
+  const [needsSessionUpgrade, setNeedsSessionUpgrade] = useState(false);
   useEffect(() => {
     let active = true;
     fetch("/api/session")
       .then((r) => (r.ok ? r.json() : {}))
       .then((session) => {
+        if (active) {
+          setServerAuthReady(Boolean(session.configured));
+          setNeedsSessionUpgrade(
+            Boolean(
+              session.connected && session.configured && !session.renewable,
+            ),
+          );
+        }
         if (active && session.token) {
           setToken(session.token);
           loadBooks(session.token);
@@ -345,8 +356,96 @@ function App() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("auth_error");
+    if (!code) return;
+    const messages = {
+      state: "Google sign-in timed out. Please try connecting again.",
+      cancelled: "Google sign-in was cancelled.",
+      scope: "Allow read-only Drive access to connect your library.",
+      refresh:
+        "Google did not provide offline access. Please connect again and allow the requested access.",
+      exchange: "Google sign-in could not be completed. Please try again.",
+    };
+    setError(messages[code] || "Google sign-in could not be completed.");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname,
+    );
+  }, []);
+  useEffect(() => {
+    if (token !== "server-session") return;
+    let lastInteraction = Date.now(),
+      lastTouch = Date.now(),
+      inFlight = false,
+      active = true;
+    async function touch() {
+      const now = Date.now();
+      if (
+        !active ||
+        inFlight ||
+        !shouldTouchSession({
+          now,
+          lastInteraction,
+          lastTouch,
+          hidden: document.hidden,
+        })
+      )
+        return;
+      inFlight = true;
+      lastTouch = now;
+      try {
+        const response = await fetch("/api/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "touch" }),
+        });
+        if (response.status === 401 && active) {
+          const data = await response.json();
+          window.dispatchEvent(new Event("folio-save-reading"));
+          request.current++;
+          setToken("");
+          setSelected(null);
+          setChapter(null);
+          setPages([]);
+          setLoading(false);
+          setError(
+            data.error || "Your session expired. Connect Google Drive again.",
+          );
+        }
+      } catch {
+      } finally {
+        inFlight = false;
+      }
+    }
+    const interact = () => {
+      lastInteraction = Date.now();
+      touch();
+    };
+    const visible = () => {
+      if (!document.hidden) interact();
+    };
+    for (const event of ["pointerdown", "keydown", "wheel", "touchstart"])
+      window.addEventListener(event, interact, { passive: true });
+    document.addEventListener("visibilitychange", visible);
+    const interval = setInterval(touch, 60000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", visible);
+      for (const event of ["pointerdown", "keydown", "wheel", "touchstart"])
+        window.removeEventListener(event, interact);
+    };
+  }, [token]);
   function connect() {
     setError("");
+    if (restoring) return;
+    if (serverAuthReady) {
+      window.dispatchEvent(new Event("folio-save-reading"));
+      window.location.assign("/api/auth/start");
+      return;
+    }
     if (!clientId) {
       setSettings(true);
       return;
@@ -589,6 +688,14 @@ function App() {
             <span className="avatar">F</span>
           </div>
         </header>
+        {needsSessionUpgrade && token && (
+          <div className="connection-upgrade">
+            <span>
+              Connect once to keep your Drive signed in automatically.
+            </span>
+            <button onClick={connect}>Keep Drive connected</button>
+          </div>
+        )}
         {error && (
           <div role="alert" className="error">
             {error}
@@ -981,13 +1088,16 @@ function App() {
             <h2 id="settings-title">Connect your reading room</h2>
             <p>
               This site uses Google’s read-only authorization to load your
-              private books. Your connection is remembered on this browser until
-              Google’s access token expires.
+              private books.{" "}
+              {serverAuthReady
+                ? "Stay connected while you use your library. Sign-in expires after three days of inactivity."
+                : "Your connection is remembered until Google’s access token expires."}
             </p>
             <label>
               Google OAuth web client ID
               <input
                 value={clientId}
+                readOnly={serverAuthReady}
                 onChange={(e) => setClientId(e.target.value)}
                 placeholder="…apps.googleusercontent.com"
               />
