@@ -3,9 +3,9 @@ export function pageRatio(file) {
   const { width, height } = file.imageMediaMetadata || {};
   return width > 0 && height > 0 ? width / height : 2 / 3;
 }
-export function preloadMargin(viewportHeight) {
+export function nextEpisodeMargin(viewportHeight) {
   const screen = Math.max(1, viewportHeight);
-  return `${screen}px 0px ${screen * 3}px 0px`;
+  return `0px 0px ${screen * 3}px 0px`;
 }
 // Limit Drive downloads so nearby pages do not compete with the whole chapter.
 // Priority is evaluated when a slot opens, so a fast scroll overtakes old work.

@@ -34,11 +34,7 @@ import ReaderStream from "./ReaderStream";
 import { remember } from "./document-settings";
 import { documentType } from "./document-settings";
 const DocumentReader = React.lazy(() => import("./DocumentReader"));
-import {
-  createDownloadQueue,
-  pageRatio,
-  preloadMargin,
-} from "./reader-loading";
+import { createDownloadQueue, pageRatio } from "./reader-loading";
 const downloadPage = createDownloadQueue(4);
 const readStorage = (key, fallback) => {
   try {
@@ -57,8 +53,9 @@ function Media({ file, token, onReconnect }) {
   const recoverImage = useRef(() => {});
   useEffect(() => {
     let active = true,
-      observer,
-      started = false;
+      started = false,
+      watchdog,
+      fallbackController;
     const controller = new AbortController();
     let fallbackStarted = false,
       fallbackUrl;
@@ -72,21 +69,36 @@ function Media({ file, token, onReconnect }) {
         return;
       }
       fallbackStarted = true;
+      clearTimeout(watchdog);
+      fallbackController = new AbortController();
+      const abortFallback = () => fallbackController.abort();
+      controller.signal.addEventListener("abort", abortFallback, {
+        once: true,
+      });
+      const fallbackTimeout = setTimeout(abortFallback, 20000);
       try {
         // A temporary proxy failure should not interrupt reading or require login.
         const response = await driveRequest(
           token,
           `files/${file.id}`,
           { alt: "media" },
-          controller.signal,
+          fallbackController.signal,
         );
         const blob = await response.blob();
         if (!active) return;
         fallbackUrl = URL.createObjectURL(blob);
         setUrl(fallbackUrl);
       } catch (e) {
-        if (active && e.name !== "AbortError") setError(e.message);
+        if (active && !controller.signal.aborted)
+          setError(
+            e.name === "AbortError"
+              ? "Image download timed out. Retry this page."
+              : e.message,
+          );
         finishLoad.current();
+      } finally {
+        clearTimeout(fallbackTimeout);
+        controller.signal.removeEventListener("abort", abortFallback);
       }
     };
     setUrl("");
@@ -95,7 +107,6 @@ function Media({ file, token, onReconnect }) {
     const start = () => {
       if (started) return;
       started = true;
-      observer?.disconnect();
       downloadPage(
         () =>
           new Promise((resolve, reject) => {
@@ -104,12 +115,16 @@ function Media({ file, token, onReconnect }) {
               return;
             }
             const source = `/api/image?id=${encodeURIComponent(file.id)}&attempt=${retry}`;
-            finishLoad.current = resolve;
+            finishLoad.current = () => {
+              clearTimeout(watchdog);
+              resolve();
+            };
             controller.signal.addEventListener("abort", resolve, {
               once: true,
             });
             // The actual visible image owns the request and renders while streaming.
             setUrl(source);
+            watchdog = setTimeout(() => recoverImage.current(), 20000);
             if (file.mimeType === "application/pdf") resolve();
           }),
         controller.signal,
@@ -125,26 +140,14 @@ function Media({ file, token, onReconnect }) {
         if (active && e.name !== "AbortError") setError(e.message);
       });
     };
-    // Rebuild the buffer on resize/orientation change; the observer keeps
-    // replenishing it as each new screen enters the three-screen lookahead.
-    const observe = () => {
-      if (started) return;
-      observer?.disconnect();
-      observer = new IntersectionObserver(
-        (entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) start();
-        },
-        { rootMargin: preloadMargin(window.innerHeight) },
-      );
-      observer.observe(ref.current);
-    };
-    observe();
-    window.addEventListener("resize", observe);
+    // Enqueue every image in this episode immediately. The queue limits
+    // simultaneous requests, but scrolling never decides which files download.
+    start();
     return () => {
       active = false;
+      clearTimeout(watchdog);
       controller.abort();
-      observer?.disconnect();
-      window.removeEventListener("resize", observe);
+      fallbackController?.abort();
       if (fallbackUrl) URL.revokeObjectURL(fallbackUrl);
     };
   }, [file.id, token, retry]);
@@ -254,7 +257,7 @@ function App() {
     [progress, setProgress] = useState(() => readStorage("folio-progress", {}));
   const [activeChapter, setActiveChapter] = useState(null);
   const [continuous, setContinuous] = useState(() =>
-    readStorage("folio-continuous", false),
+    readStorage("folio-continuous", true),
   );
   const [chapterListOpen, setChapterListOpen] = useState(false);
   function goBack(fromHistory = false) {

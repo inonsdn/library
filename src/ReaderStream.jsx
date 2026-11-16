@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { chapterFiles, FOLDER } from "./drive";
+import { nextEpisodeMargin } from "./reader-loading";
 import { stored, remember } from "./document-settings";
 import { captureAnchor, anchorScrollTop } from "./reading-position";
 export default function ReaderStream({
@@ -54,7 +55,7 @@ export default function ReaderStream({
             if (alive) setFetching(false);
           });
       },
-      { rootMargin: `${window.innerHeight * 3}px 0px` },
+      { rootMargin: nextEpisodeMargin(window.innerHeight) },
     );
     observer.observe(sentinel.current);
     return () => {
