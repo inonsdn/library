@@ -30,6 +30,8 @@ import {
   driveRequest,
 } from "./drive";
 import "./style.css";
+import ReaderStream from "./ReaderStream";
+import { remember } from "./document-settings";
 import { documentType } from "./document-settings";
 const DocumentReader = React.lazy(() => import("./DocumentReader"));
 import {
@@ -250,7 +252,29 @@ function App() {
     [view, setView] = useState("grid");
   const [saved, setSaved] = useState(() => readStorage("folio-saved", [])),
     [progress, setProgress] = useState(() => readStorage("folio-progress", {}));
+  const [activeChapter, setActiveChapter] = useState(null);
+  const [continuous, setContinuous] = useState(() =>
+    readStorage("folio-continuous", false),
+  );
   const [chapterListOpen, setChapterListOpen] = useState(false);
+  function goBack(fromHistory = false) {
+    window.dispatchEvent(new Event("folio-save-reading"));
+    if (fromHistory !== true && window.history.state?.folioReader)
+      window.history.back();
+    request.current++;
+    if (chapter && selected?.mimeType === FOLDER && chapters.length) {
+      setChapter(null);
+      setPages([]);
+      setActiveChapter(null);
+    } else {
+      setSelected(null);
+      setChapter(null);
+      setActiveChapter(null);
+    }
+    setLoading(false);
+    setError("");
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
   const [scrollToolsOpen, setScrollToolsOpen] = useState(false);
   function jumpTo(edge) {
     window.scrollTo({
@@ -260,6 +284,21 @@ function App() {
         : "smooth",
     });
   }
+  useEffect(() => {
+    if (!chapter) return;
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    window.history.pushState(
+      { ...window.history.state, folioReader: true },
+      "",
+    );
+    const pop = () => goBack(true);
+    window.addEventListener("popstate", pop);
+    return () => {
+      window.removeEventListener("popstate", pop);
+      window.history.scrollRestoration = previousRestoration;
+    };
+  }, [Boolean(chapter)]);
   const request = useRef(0);
   const saveProgress = (book, ch) =>
     setProgress((p) => {
@@ -359,6 +398,7 @@ function App() {
       .requestAccessToken();
   }
   async function disconnect() {
+    window.dispatchEvent(new Event("folio-save-reading"));
     try {
       const response = await fetch("/api/session", { method: "DELETE" });
       if (!response.ok) throw new Error();
@@ -378,8 +418,10 @@ function App() {
     setLoading(false);
   }
   async function openBook(book) {
+    window.dispatchEvent(new Event("folio-save-reading"));
     const n = ++request.current;
     setSelected(book);
+    setActiveChapter(null);
     setChapter(null);
     setChapters([]);
     setPages([]);
@@ -422,8 +464,10 @@ function App() {
     }
   }
   async function openChapter(ch) {
+    window.dispatchEvent(new Event("folio-save-reading"));
     const n = ++request.current;
     setChapter(ch);
+    setActiveChapter(ch);
     setPages([]);
     setError("");
     setLoading(true);
@@ -458,7 +502,8 @@ function App() {
   const lastRead = books
     .filter((b) => progress[b.id])
     .sort((a, b) => progress[b.id].at - progress[a.id].at)[0];
-  const chapterIndex = chapters.findIndex((c) => c.id === chapter?.id);
+  const currentChapter = activeChapter || chapter;
+  const chapterIndex = chapters.findIndex((c) => c.id === currentChapter?.id);
   return (
     <div className={chapter ? "app reading" : "app"}>
       <aside>
@@ -466,6 +511,7 @@ function App() {
           className="brand"
           href="#"
           onClick={() => {
+            window.dispatchEvent(new Event("folio-save-reading"));
             request.current++;
             setSelected(null);
             setChapter(null);
@@ -487,6 +533,7 @@ function App() {
             key={id}
             className={`nav ${tab === id ? "active" : ""}`}
             onClick={() => {
+              window.dispatchEvent(new Event("folio-save-reading"));
               request.current++;
               setTab(id);
               setSelected(null);
@@ -550,25 +597,7 @@ function App() {
         {selected ? (
           <>
             <div className="reader-heading">
-              <button
-                className="back"
-                onClick={() => {
-                  request.current++;
-                  if (
-                    chapter &&
-                    selected.mimeType === FOLDER &&
-                    chapters.length
-                  ) {
-                    setChapter(null);
-                    setPages([]);
-                  } else {
-                    setSelected(null);
-                    setChapter(null);
-                  }
-                  setLoading(false);
-                  setError("");
-                }}
-              >
+              <button className="back" onClick={goBack}>
                 <ArrowLeft size={18} />{" "}
                 {chapter ? "Back to books / chapters" : "Back to library"}
               </button>
@@ -578,7 +607,7 @@ function App() {
                   <>
                     <select
                       aria-label="Select chapter"
-                      value={chapter.id}
+                      value={currentChapter.id}
                       onChange={(e) =>
                         openChapter(
                           chapters.find((c) => c.id === e.target.value),
@@ -591,7 +620,21 @@ function App() {
                         </option>
                       ))}
                     </select>
-                    <span>{pages.length} pages</span>
+                    <span>{pages.length} files</span>
+                    <label className="continuous-toggle">
+                      <input
+                        type="checkbox"
+                        checked={continuous}
+                        onChange={(e) => {
+                          const enabled = e.target.checked;
+                          setContinuous(enabled);
+                          remember("folio-continuous", enabled);
+                          if (activeChapter && activeChapter.id !== chapter.id)
+                            openChapter(activeChapter);
+                        }}
+                      />
+                      Continuous episodes
+                    </label>
                   </>
                 ) : (
                   <p>Choose a chapter and settle in.</p>
@@ -609,11 +652,21 @@ function App() {
               <div className="empty">Opening your reading room…</div>
             ) : chapter ? (
               <>
-                <div className="reading-pages">
-                  {pages.map((f) =>
+                <ReaderStream
+                  key={`${selected.id}-${chapter.id}`}
+                  book={selected}
+                  initialChapter={chapter}
+                  initialPages={pages}
+                  chapters={chapters}
+                  token={token}
+                  continuous={continuous}
+                  onActive={(ch) => {
+                    setActiveChapter(ch);
+                    saveProgress(selected, ch);
+                  }}
+                  renderFile={(f, ch) =>
                     documentType(f) ? (
                       <React.Suspense
-                        key={`${chapter.id}-${f.id}`}
                         fallback={
                           <div className="document-loading">
                             Opening reader…
@@ -626,22 +679,11 @@ function App() {
                           onReconnect={connect}
                         />
                       </React.Suspense>
-                    ) : f.mimeType.startsWith("image/") ? (
-                      <Media
-                        key={`${chapter.id}-${f.id}`}
-                        file={f}
-                        token={token}
-                        onReconnect={connect}
-                      />
-                    ) : null,
-                  )}
-                  {!pages.length && (
-                    <div className="empty">
-                      No readable files found in this chapter. Use “View in
-                      Drive” to inspect its contents.
-                    </div>
-                  )}
-                </div>
+                    ) : (
+                      <Media file={f} token={token} onReconnect={connect} />
+                    )
+                  }
+                />
                 <div className="chapter-navigation">
                   <button
                     disabled={chapterIndex <= 0}
@@ -860,6 +902,16 @@ function App() {
           </>
         )}
       </main>
+      {chapter && (
+        <button
+          className="reading-back"
+          onClick={goBack}
+          aria-label="Back to chapters"
+        >
+          <ArrowLeft size={19} />
+          <span>Back</span>
+        </button>
+      )}
       {chapter && (
         <div className={`scroll-tools ${scrollToolsOpen ? "expanded" : ""}`}>
           {scrollToolsOpen && (
